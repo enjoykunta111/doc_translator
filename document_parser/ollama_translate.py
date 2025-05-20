@@ -7,8 +7,14 @@ def load_prompt(template_key, **kwargs):
     prompt_path = os.path.join(os.path.dirname(__file__), '..', 'prompt', 'tax_translation_prompt.yaml')
     with open(prompt_path, 'r', encoding='utf-8') as f:
         prompts = yaml.safe_load(f)
+    description = prompts[template_key].get('description', '')
     template = prompts[template_key]['template']
-    return template.replace('{{source_sentence}}', kwargs.get('source_sentence', '')).replace('{{source_paragraph}}', kwargs.get('source_paragraph', ''))
+    # description과 template을 합쳐서 프롬프트 생성
+    merged_prompt = description.strip() + "\n" + template.strip()
+    merged_prompt = merged_prompt.replace('{{source_sentence}}', kwargs.get('source_sentence', ''))
+    merged_prompt = merged_prompt.replace('{{source_paragraph}}', kwargs.get('source_paragraph', ''))
+    return merged_prompt
+
 
 def translate_with_ollama(text, model='exaone3.5:2.4b'):
     # 문장 단위 번역 프롬프트 사용
