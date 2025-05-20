@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>문서 번역기</title>
+  <style>
+    body { display: flex; height: 100vh; margin: 0; font-family: sans-serif; }
+    .sidebar { width: 200px; background: #f4f4f4; padding: 10px; box-shadow: 2px 0 5px rgba(0,0,0,0.1); }
+    .main { flex: 1; display: flex; flex-direction: row; }
+    .file-list, .file-content { flex: 1; padding: 10px; overflow-y: auto; border-left: 1px solid #ccc; }
+    .file-item { padding: 5px; cursor: pointer; border-bottom: 1px solid #eee; }
+    .file-item:hover { background: #eee; }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h3>📁 문서 번역기</h3>
+    <button onclick="selectFolder()">폴더 선택</button>
+  </div>
+
+  <div class="main">
+    <div class="file-list" id="fileList">
+      <h4>파일 목록</h4>
+      <!-- 파일 목록이 여기에 표시됨 -->
+    </div>
+    <div class="file-content" id="fileContent">
+      <h4>번역 결과</h4>
+      <!-- 번역 결과가 여기에 표시됨 -->
+    </div>
+  </div>
+
+  <script>
+    async function selectFolder() {
+      const result = await fetch('/select_folder');
+      const files = await result.json();
+      const fileListDiv = document.getElementById('fileList');
+      fileListDiv.innerHTML = '<h4>파일 목록</h4>';
+      files.forEach(filename => {
+        const el = document.createElement('div');
+        el.className = 'file-item';
+        el.innerText = filename;
+        el.onclick = () => streamTranslate(filename);
+        fileListDiv.appendChild(el);
+      });
+    }
+
+    // SSE 방식 실시간 번역 함수
+    function streamTranslate(filename) {
+      const contentDiv = document.getElementById('fileContent');
+      // 초기화: 페이지-문단-문장 구조를 저장할 임시 객체
+      let pageMap = {};
+      contentDiv.innerHTML = `<h4>${filename} 번역 결과 (실시간)</h4><div id="sseResult"></div>`;
+      const resultDiv = document.getElementById('sseResult');
+
+      const evtSource = new EventSource(`/stream_translate_file?filename=${encodeURIComponent(filename)}`);
+      evtSource.onmessage = function(event) {
+        const data = JSON.parse(event.data);
+        if (data.error) {
+          resultDiv.innerHTML = `<span style="color:red;">오류: ${data.error}</span>`;
+          evtSource.close();
+          return;
+        }
+        // PDF 구조: page_number, paragraph_index, sentence_index, original, translated
+        const { page_number, paragraph_index, sentence_index, original, translated } = data;
+        if (page_number !== undefined) {
+          if (!pageMap[page_number]) pageMap[page_number] = {};
+          if (!pageMap[page_number][paragraph_index]) pageMap[page_number][paragraph_index] = [];
+          pageMap[page_number][paragraph_index][sentence_index] = { original, translated };
+        } else {
+          // 기존 방식(페이지 정보 없음)
+          if (!pageMap[paragraph_index]) pageMap[paragraph_index] = [];
+          pageMap[paragraph_index][sentence_index] = { original, translated };
+        }
+        // 화면 갱신
+        let html = '';
+        if (Object.keys(pageMap).length > 0 && typeof Object.keys(pageMap)[0] === 'string') {
+          // PDF 구조
+          Object.keys(pageMap).sort((a,b)=>a-b).forEach(pageNum => {
+            html += `<div style="margin-bottom:18px; border-bottom:1px solid #ddd;"><h4>페이지 ${pageNum}</h4>`;
+            const paraMap = pageMap[pageNum];
+            Object.keys(paraMap).sort((a,b)=>a-b).forEach(pIdx => {
+              html += `<div style="margin-bottom:8px;"><b>문단 ${parseInt(pIdx)+1}</b><ul>`;
+              paraMap[pIdx].forEach(s => {
+                html += `<li><span style="color:#333">${s.original}</span> <span style="color:#888">→</span> <span style="color:#007bff">${s.translated}</span></li>`;
+              });
+              html += '</ul></div>';
+            });
+            html += '</div>';
+          });
+        } else {
+          // 기존 방식(페이지 정보 없음)
+          Object.keys(pageMap).sort((a,b)=>a-b).forEach(pIdx => {
+            html += `<div style="margin-bottom:12px;"><b>문단 ${parseInt(pIdx)+1}</b><ul>`;
+            pageMap[pIdx].forEach(s => {
+              html += `<li><span style="color:#333">${s.original}</span> <span style="color:#888">→</span> <span style="color:#007bff">${s.translated}</span></li>`;
+            });
+            html += '</ul></div>';
+          });
+        }
+        resultDiv.innerHTML = html;
+      };
+      evtSource.onerror = function() {
+        evtSource.close();
+      };
+    }
+  </script>
+</body>
+</html>
